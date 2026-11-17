@@ -62,6 +62,41 @@ python make_sheet.py --codes-file payloads.txt --dpi 600
 `--generate` makes random payloads from the chosen alphabet with a fixed seed, so
 the same seed always gives the same codes and a run can be repeated.
 
+## The four pack symbols
+
+A pack carries four different symbols and they are not interchangeable:
+
+| Item | Symbology | Where it goes | Payload |
+|---|---|---|---|
+| Trigger | Code 128 | Trigger bottle, printed vertically | 10 characters |
+| Reagent | Code 128 | Cartridge label | 9 characters |
+| Method | QR | Manufacturer's method sheet | opaque text |
+| Package | QR | Outer carton | opaque text |
+
+```
+python pack_app.py                       # window
+python make_pack.py --out pack.pdf \
+    --trigger IQEApeCg6t \
+    --reagent iwUMArCYU \
+    --method "TSH;Cal1;Lot20250902" \
+    --package IQEA35yQjQ
+```
+
+Any subset works -- leave a field empty and that symbol is not printed.
+
+Both short codes are Code 128 Subset B, which is forced by the payload: the codes
+carry lower case letters and `+`/`/`, and Code 39 cannot represent either.
+
+**QR is forced to a full symbol, never Micro QR.** `segno` picks Micro QR for
+short text by default, and many fixed-mount readers do not decode it. The tool
+passes `micro=False` so the shortest payload still produces a 21x21 symbol.
+
+### Size caps
+
+Bars default to 55 mm and QR squares to 30 mm, not the full page width. Without a
+cap the trigger bar stretches to 181 mm on A4, which is a poster rather than a
+label. Override with `--qr-square` or the max-bar-width field in the window.
+
 ## Printing complete labels
 
 `label_app.py` prints a whole product label -- product name, volume, lot, expiry,
@@ -191,18 +226,23 @@ python -m unittest discover -s tests
 ```
 bcgen/code128.py     encoder, element width table, checksum
 bcgen/generate.py    synthetic payloads
+bcgen/kind.py        the four pack items, QR matrix and drawing
+bcgen/pack.py        four-symbol sheet layout
 bcgen/render.py      dot-exact bar drawing, free sizing, grid snapping
 bcgen/sheet.py       A4 test-sheet layout
 bcgen/label.py       full product label, roll and sheet
 bcgen/measure.py     measures printed element widths in pixels
 bcgen/results.py     observation log and smallest-working-size query
 make_sheet.py        command line for test sheets
+make_labels.py       command line for product labels
+make_pack.py         command line for the four pack symbols
 app.py               window for test sheets
 label_app.py         window for product labels
+pack_app.py          window for the four pack symbols
 selftest.py          render, decode, compare
 verify_read.py       compare a scanner reading with the printed payload
-tests/               unit and label checks
-samples/             pre-built sheets for 300 and 600 dpi
+tests/               unit, label and pack checks
+samples/             pre-built sheets, labels and pack symbols
 ```
 
 ## What this tool does not do
