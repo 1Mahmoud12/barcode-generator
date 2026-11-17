@@ -3,7 +3,11 @@ __pycache__/
 *.pyc
 build/
 dist/
+
+# PyInstaller writes a generated spec next to the script, but build.spec is
+# hand-written source and must be tracked.
 *.spec
+!build.spec
 
 # Real pack data and generated samples live outside the repo on purpose:
 # a calibration payload describes another manufacturer's product.
