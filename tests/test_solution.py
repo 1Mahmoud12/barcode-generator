@@ -37,7 +37,7 @@ class ValidationTests(unittest.TestCase):
 
     def test_valid_pretrigger(self) -> None:
         SolutionLabel(
-            kind="pretrigger", code="wEEAIyAAYr", volume_ml=800,
+            kind="pretrigger", code="wEEPoNc1+4", volume_ml=800,
             lot="20220401", produced="2022-04-01", expiry="2023-04-12",
         ).validate()
 
