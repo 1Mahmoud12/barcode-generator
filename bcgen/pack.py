@@ -31,6 +31,10 @@ BAR_HEIGHT_MM = 14.0
 DEFAULT_BAR_WIDTH_MM = 55.0
 DEFAULT_QR_MM = 30.0
 
+# A module finer than this on thermal stock loses its edge. Used to grow the QR
+# square automatically when the payload is long.
+MIN_QR_MODULE_DOTS = 3
+
 
 @dataclass(frozen=True)
 class Placement:
@@ -171,7 +175,17 @@ def build_pack_sheet(
 
     if qr_square_mm is None:
         available = inner_w - BLOCK_GAP_MM * max(0, len(squares) - 1)
-        qr_square_mm = min(DEFAULT_QR_MM, available / max(1, len(squares)))
+        wanted = DEFAULT_QR_MM
+        for item in squares:
+            modules = kind.qr_modules(item.text) + 2 * kind.qr_quiet_modules()
+            # Grow until the *module* is printable, not until the square reaches a
+            # nominal size. A 105-module symbol at 30 mm has a module of 0.27 mm,
+            # which a thermal head will smear; the same module size on a 21-module
+            # symbol would be 1.3 mm. Module size, not square size, decides whether
+            # the code reads.
+            needed = modules * MIN_QR_MODULE_DOTS * render.dot_mm(dpi)
+            wanted = max(wanted, needed)
+        qr_square_mm = min(wanted, available / max(1, len(squares)))
 
     bar_block_h = KIND_LABEL_MM + BAR_HEIGHT_MM + CAPTION_MM + 1.2
     qr_block_h = KIND_LABEL_MM + qr_square_mm + CAPTION_MM + 1.2

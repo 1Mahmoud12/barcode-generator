@@ -97,6 +97,52 @@ Bars default to 55 mm and QR squares to 30 mm, not the full page width. Without 
 cap the trigger bar stretches to 181 mm on A4, which is a poster rather than a
 label. Override with `--qr-square` or the max-bar-width field in the window.
 
+## Long payloads: the calibration QR
+
+The package QR on a calibration carton is **712 characters**, which encodes as a
+**105x105** symbol. Two things matter here and neither is obvious:
+
+**1. The payload is base64 and must be reproduced byte for byte.** Base64 has no
+error tolerance for a hand copy: one wrong character silently changes a number in
+the calibration data. Always scan the QR rather than retyping it, and use
+*Check package payload* before printing.
+
+**2. Module size governs readability, not square size.** A 105-module symbol
+printed at 28 mm has a module of 0.27 mm. On 203 dpi thermal paper that smears.
+The tool therefore sizes by *dots per module* and grows the square until the
+module is at least 3 printer dots:
+
+| dpi | module | printed square |
+|---|---|---|
+| 203 | 0.375 mm | 42.4 mm |
+| 300 | 0.254 mm | 28.7 mm |
+| 600 | 0.254 mm | 28.7 mm |
+
+At 203 dpi the square grows to 42 mm on purpose. Shrinking it to match 300 dpi
+would look neater and read worse.
+
+### Checking a scanned payload
+
+```
+python - <<'EOF'
+from bcgen import payload
+text = open("scanned.txt").read().strip()
+print(payload.round_trip(text).describe())
+for line in payload.structure(text).summary():
+    print(" ", line)
+print(payload.check_reproducible(text))
+EOF
+```
+
+`round_trip` decodes the base64 and re-encodes it, and reports whether the result
+is identical to what was scanned. `structure` prints the top-level fields so you
+can compare against the printed label -- the lot and expiry are visible in the
+header, which is a fast way to confirm you scanned the right carton.
+
+The decoded fields are **shown, never used**. Nothing is derived from them and
+nothing is written back into the payload.
+
+
 ## Printing complete labels
 
 `label_app.py` prints a whole product label -- product name, volume, lot, expiry,
@@ -228,6 +274,7 @@ bcgen/code128.py     encoder, element width table, checksum
 bcgen/generate.py    synthetic payloads
 bcgen/kind.py        the four pack items, QR matrix and drawing
 bcgen/pack.py        four-symbol sheet layout
+bcgen/payload.py     long base64 payload round-trip and structure display
 bcgen/render.py      dot-exact bar drawing, free sizing, grid snapping
 bcgen/sheet.py       A4 test-sheet layout
 bcgen/label.py       full product label, roll and sheet

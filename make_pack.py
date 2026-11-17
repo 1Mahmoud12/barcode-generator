@@ -84,7 +84,9 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"wrote {args.out} ({args.dpi} dpi, {page_w:.0f}x{page_h:.0f} mm)")
     for placement in placements:
-        print(f"  {placement.item.kind.title:8} {placement.item.text}")
+        text = placement.item.text
+        shown = text if len(text) <= 48 else f"{text[:45]}... ({len(text)} chars)"
+        print(f"  {placement.item.kind.title:8} {shown}")
         print(f"           {kind.describe(placement.item, dpi=args.dpi, width_mm=placement.width_mm)}")
     return 0
 

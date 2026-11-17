@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from bcgen import kind, pack, render
+from bcgen import kind, pack, payload, render
 from bcgen.kind import Item, Kind, KindError
 
 PREVIEW_SCALE = 2.2
@@ -85,6 +85,10 @@ class PackWindow(QMainWindow):
 
         self.package_qr = QLineEdit("IQEA35yQjQ")
         form.addRow("Package (QR)", self.package_qr)
+
+        self.verify_button = QPushButton("Check package payload")
+        self.verify_button.clicked.connect(self._check_payload)
+        form.addRow("", self.verify_button)
         layout.addWidget(codes)
 
         size_box = QGroupBox("Printed size")
@@ -150,6 +154,45 @@ class PackWindow(QMainWindow):
             items.append(Item(Kind.PACKAGE, self.package_qr.text().strip()))
         return items
 
+    def _check_payload(self) -> None:
+        """Show what the package payload is, and prove it reprints identically."""
+        text = self.package_qr.text().strip()
+        if not text:
+            QMessageBox.information(self, "Nothing to check", "The package field is empty.")
+            return
+
+        problems = payload.check_reproducible(text)
+        lines: list[str] = []
+
+        if payload.looks_like_base64(text):
+            trip = payload.round_trip(text)
+            lines.append(trip.describe())
+            info = payload.structure(text)
+            lines.append("")
+            lines.append("decoded structure (shown for comparison only):")
+            lines.extend("  " + line for line in info.summary())
+            lines.append("")
+            lines.append(f"  decoded text starts: {trip.decoded[:70]}...")
+        else:
+            lines.append(f"plain text, {len(text)} characters")
+            try:
+                lines.append(f"QR: {kind.qr_modules(text)}x{kind.qr_modules(text)} modules")
+            except KindError as exc:
+                lines.append(f"QR: {exc}")
+
+        lines.append("")
+        if problems:
+            lines.append("PROBLEMS:")
+            lines.extend("  - " + p for p in problems)
+        else:
+            lines.append("OK - safe to print")
+
+        self.info.setPlainText("\n".join(lines))
+        if problems:
+            self._status("Payload has problems; see the details.")
+        else:
+            self._status("Payload verified.")
+
     def _page(self) -> tuple[float, float]:
         choice = self.page_size.currentText()
         if choice.startswith("Roll 76"):
@@ -190,6 +233,19 @@ class PackWindow(QMainWindow):
             QMessageBox.warning(self, "Cannot render", str(exc))
             return
 
+        # A long QR is the easiest thing to get subtly wrong, so prove every
+        # symbol in the built file decodes back to the text that went in.
+        mismatches = self._read_back(path, dpi, items)
+        if mismatches:
+            detail = "\n".join(mismatches[:6])
+            QMessageBox.critical(
+                self,
+                "Built file does not read back correctly",
+                "The PDF was generated but a symbol does not decode to its own text. "
+                "Do not print this file.\n\n" + detail,
+            )
+            return
+
         self._pdf_path = path
         self.save_button.setEnabled(True)
         self._show(path)
@@ -206,6 +262,35 @@ class PackWindow(QMainWindow):
                 lines.append(f"{placement.item.kind.title}: {exc}")
         self.info.setPlainText("\n".join(lines))
         self._status(f"Built {len(placements)} symbols.")
+
+    def _read_back(self, path: str, dpi: int, items: list[Item]) -> list[str]:
+        """Decode the built page and report any symbol that is not exact."""
+        try:
+            import pypdfium2 as pdfium
+            import zxingcpp
+        except ImportError:
+            return []
+
+        expected = {item.text for item in items}
+        problems: list[str] = []
+        try:
+            doc = pdfium.PdfDocument(path)
+            try:
+                image = doc[0].render(scale=dpi / 72).to_pil()
+            finally:
+                doc.close()
+            found = {r.text for r in zxingcpp.read_barcodes(image)}
+        except Exception as exc:  # noqa: BLE001 - never block printing on a reader bug
+            return [f"read-back unavailable: {exc}"]
+
+        for text in expected:
+            if text not in found:
+                shown = text if len(text) <= 40 else text[:37] + "..."
+                problems.append(f"not read back: {shown}")
+        for text in found - expected:
+            shown = text if len(text) <= 40 else text[:37] + "..."
+            problems.append(f"unexpected reading: {shown}")
+        return problems
 
     def _show(self, path: str) -> None:
         try:
