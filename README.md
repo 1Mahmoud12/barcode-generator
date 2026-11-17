@@ -143,6 +143,100 @@ The decoded fields are **shown, never used**. Nothing is derived from them and
 nothing is written back into the payload.
 
 
+## Fitting your own calibration curve
+
+A curve fitted from your own measurements is the only one that can honestly
+describe your product. `calib.py` does that and nothing else: input is a table of
+concentrations and the signals you observed, output is a curve plus the evidence.
+
+```
+python fit_curve.py samples/calibrators.csv --signal 300000 --csv-out params.csv
+```
+
+CSV format: `concentration,signal[,weight,label]`.
+
+### The model
+
+4PL or 5PL, the standards for immunoassay:
+
+```
+4PL:  y = d + (a - d) / (1 + (x / c) ** b)
+5PL:  y = d + (a - d) / (1 + (x / c) ** b) ** g
+```
+
+`a` is the response at zero, `d` at saturation, `c` the inflection point, `b` the
+slope, `g` the asymmetry (`g = 1` makes the 5PL identical to the 4PL).
+
+### Three guards that matter
+
+**1. The blank is pinned by default.** The zero calibrator's measured signal
+defines `a`. Letting the solver move `a` freely produces a negative value that
+fits the middle better and reports nonsense at the low end. Pinning it is what
+keeps low-end results honest.
+
+**2. A 5PL must earn its extra parameter.** An asymmetry within 5% of 1 is doing
+nothing, so the 4PL wins rather than chasing a rounding difference.
+
+**3. A 5PL must also be believable in shape.** This is the one that matters most.
+On a truly 4PL dataset, a 5PL can reach a lower RMSE by pairing a large `g` with a
+large `c` -- the two cancel out and the curve passes near every calibrator while
+describing the wrong shape between them. The tell-tale is an inflection point
+outside the measured range, which means every sample result would be an
+extrapolation. `plausible()` reports this, `best_fit()` rejects it, and the window
+prints the warning rather than hiding it.
+
+### Recovery is the acceptance test
+
+For each calibrator, the *measured* signal is run back through the curve and the
+resulting concentration compared with the one that was made. That is not
+circular -- it uses the measurement, not the fit -- and it is what a reviewer will
+ask about. Default acceptance is 80-120%.
+
+```
+   point         conc         signal         fitted        resid  recovery%
+---------------------------------------------------------------------------
+      C1       0.0000       197.5519       197.5519       0.0000      blank
+      C2       1.2500     22958.9874     21714.1769   -1244.8105     106.53
+```
+
+The blank is marked `blank`, not a percentage: there is no concentration to
+recover a percentage of, so it is judged by its residual instead.
+
+### Signals outside the curve
+
+`back_calculate` returns `nan` for a signal below the curve and `inf` above
+saturation. It does **not** return zero. That distinction matters: a saturated
+sample reported as zero concentration looks like a valid result and nobody would
+question it.
+
+## Keeping the register
+
+```
+python - <<'EOF'
+from bcgen.register import Register, Entry
+book = Register.load("register.csv")
+book.add(Entry(event="print", kind="reagent", code="iwUMArCYU",
+               lot="20250902", expiry="2027-04-14", product="LH"))
+EOF
+```
+
+A local append-only CSV, one row per label event. It exists to catch one mistake:
+a code that belongs to one lot printed on a pack counted against another lot.
+
+Rules it enforces:
+
+- The same code cannot be `print`ed twice. Use `reprint` to record a replacement.
+- The same code cannot appear under two lots. That is the failure that produces a
+  wrong patient result.
+- A `void` is always accepted, even for an inconsistent entry, because a
+  correction must never be blocked.
+
+`find_lot_mixing()` sweeps the whole file, catching a mix that was introduced
+before either lot was known.
+
+The register stores codes and lots. It stores the **hash** of a code as well, so a
+shared file does not leak a manufacturer's payload.
+
 ## Printing complete labels
 
 `label_app.py` prints a whole product label -- product name, volume, lot, expiry,
@@ -275,6 +369,8 @@ bcgen/generate.py    synthetic payloads
 bcgen/kind.py        the four pack items, QR matrix and drawing
 bcgen/pack.py        four-symbol sheet layout
 bcgen/payload.py     long base64 payload round-trip and structure display
+bcgen/calib.py       4PL/5PL fit, recovery, plausibility guards
+bcgen/register.py    append-only print register with lot-mixing detection
 bcgen/render.py      dot-exact bar drawing, free sizing, grid snapping
 bcgen/sheet.py       A4 test-sheet layout
 bcgen/label.py       full product label, roll and sheet
@@ -283,9 +379,11 @@ bcgen/results.py     observation log and smallest-working-size query
 make_sheet.py        command line for test sheets
 make_labels.py       command line for product labels
 make_pack.py         command line for the four pack symbols
+fit_curve.py         command line for calibration fitting
 app.py               window for test sheets
 label_app.py         window for product labels
 pack_app.py          window for the four pack symbols
+batch_app.py         window tying batch, curve, symbols and register together
 selftest.py          render, decode, compare
 verify_read.py       compare a scanner reading with the printed payload
 tests/               unit, label and pack checks
