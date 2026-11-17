@@ -62,6 +62,51 @@ python make_sheet.py --codes-file payloads.txt --dpi 600
 `--generate` makes random payloads from the chosen alphabet with a fixed seed, so
 the same seed always gives the same codes and a run can be repeated.
 
+## Printing complete labels
+
+`label_app.py` prints a whole product label -- product name, volume, lot, expiry,
+storage and notes -- with the barcode sized to the label width.
+
+```
+python label_app.py
+```
+
+Two paper models, because the hardware differs:
+
+- **Roll** -- one label per page, page size equal to the label. This is what a
+  receipt printer needs: it feeds exactly one page per job, so the page must be
+  one label tall or every print wastes stock.
+- **Sheet** -- many labels per page with dashed cut guides, for A4 sticker stock.
+
+The barcode is **not** given a fixed size. It is sized to fill the label's inner
+width, as a whole number of printer dots, and the bar height shrinks only as far
+as the data needs (never below 6 mm).
+
+### The size steps you actually get
+
+One printer dot is 0.125 mm at 203 dpi and 0.0423 mm at 300 dpi. Because a module
+must be a whole number of dots, asking for an arbitrary width snaps to whatever
+fits:
+
+| Printer | Achievable X-dimension |
+|---|---|
+| 203 dpi (receipt) | 0.125, 0.250, 0.375, 0.500 mm ... |
+| 300 dpi | 0.085, 0.127, 0.169, 0.254 mm ... |
+
+On 76 mm receipt paper a nine-character code lands on **0.375 mm** (57.8 mm wide),
+and on 58 mm paper on **0.250 mm** (38.5 mm wide). Both are comfortably readable.
+A 300 dpi label printer reaches 0.254 mm for the same label, which leaves room for
+longer payloads.
+
+### What fits on a label
+
+Height is the constraint, not width. Six data rows at a 6 mm bar need about 34 mm,
+so a 50x25 mm label carries roughly three rows. Leave a field empty and it is not
+printed -- that is the intended way to fit a small label. If even the minimum does
+not fit, the build is refused with the height it would need, rather than printing
+a clipped label.
+
+
 ## Printing
 
 1. Open the PDF in a viewer and print at **100% / Actual size**. Turn off
@@ -146,15 +191,17 @@ python -m unittest discover -s tests
 ```
 bcgen/code128.py     encoder, element width table, checksum
 bcgen/generate.py    synthetic payloads
-bcgen/render.py      dot-exact bar drawing, grid snapping
-bcgen/sheet.py       A4 page layout
+bcgen/render.py      dot-exact bar drawing, free sizing, grid snapping
+bcgen/sheet.py       A4 test-sheet layout
+bcgen/label.py       full product label, roll and sheet
 bcgen/measure.py     measures printed element widths in pixels
 bcgen/results.py     observation log and smallest-working-size query
-make_sheet.py        command line
-app.py               window
+make_sheet.py        command line for test sheets
+app.py               window for test sheets
+label_app.py         window for product labels
 selftest.py          render, decode, compare
 verify_read.py       compare a scanner reading with the printed payload
-tests/test_units.py  unit checks
+tests/               unit and label checks
 samples/             pre-built sheets for 300 and 600 dpi
 ```
 

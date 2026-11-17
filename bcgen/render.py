@@ -30,6 +30,21 @@ class RenderError(ValueError):
     """Raised when a symbol does not fit the requested space."""
 
 
+def page_height_mm(c: pdfcanvas.Canvas) -> float:
+    """Height of the current page, so drawing is not tied to one paper size."""
+    size = getattr(c, "_pagesize", None)
+    if not size:
+        return A4_HEIGHT_MM
+    return size[1] * MM_PER_INCH / POINTS_PER_INCH
+
+
+def page_width_mm(c: pdfcanvas.Canvas) -> float:
+    size = getattr(c, "_pagesize", None)
+    if not size:
+        return A4_WIDTH_MM
+    return size[0] * MM_PER_INCH / POINTS_PER_INCH
+
+
 def dots_per_mm(dpi: int) -> float:
     return dpi / MM_PER_INCH
 
@@ -89,6 +104,33 @@ def geometry(text: str, module_dots: int, dpi: int) -> Geometry:
     return Geometry(dpi=dpi, module_dots=module_dots, modules=code128.module_count(text))
 
 
+def module_dots_for_width(text: str, target_mm: float, dpi: int) -> int:
+    """Largest whole-dot bar width whose symbol plus quiet zones fits ``target_mm``.
+
+    Sizes are always whole dots, so asking for "30 mm" gives the closest width
+    that is actually printable rather than a fraction the printer would round.
+    """
+    if target_mm <= 0:
+        raise RenderError("target width must be positive")
+    modules = code128.module_count(text)
+    if modules <= 0:
+        raise RenderError("empty symbol")
+    per_module_mm = target_mm / (modules + 2 * QUIET_ZONE_MODULES)
+    module_dots = int(per_module_mm / dot_mm(dpi))
+    if module_dots < 1:
+        raise RenderError(
+            f"{target_mm:.1f} mm is too narrow for {len(text)} characters at {dpi} dpi; "
+            f"the narrowest possible symbol is "
+            f"{(modules + 2 * QUIET_ZONE_MODULES) * dot_mm(dpi):.1f} mm"
+        )
+    return module_dots
+
+
+def geometry_for_width(text: str, target_mm: float, dpi: int) -> Geometry:
+    """Geometry that fills ``target_mm`` as closely as whole dots allow."""
+    return geometry(text, module_dots_for_width(text, target_mm, dpi), dpi)
+
+
 def ladder(dpi: int, module_dots: tuple[int, ...] = (3, 4, 5, 6, 8, 10, 12)) -> list[int]:
     """The bar-width rungs to print, smallest first."""
     return sorted({int(d) for d in module_dots if int(d) >= 1})
@@ -118,8 +160,9 @@ def draw_symbol(
     x_pt = round(mm_to_points(snap_to_dot(x_mm, dpi)) / dot_pt) * dot_pt
 
     # Baseline: y measured from top, PDF y grows upwards.
-    top_pt = round(mm_to_points(A4_HEIGHT_MM - snap_to_dot(y_mm, dpi)) / dot_pt) * dot_pt
-    bottom_pt = round(mm_to_points(A4_HEIGHT_MM - snap_to_dot(y_mm + height_mm, dpi)) / dot_pt) * dot_pt
+    page_h = page_height_mm(c)
+    top_pt = round(mm_to_points(page_h - snap_to_dot(y_mm, dpi)) / dot_pt) * dot_pt
+    bottom_pt = round(mm_to_points(page_h - snap_to_dot(y_mm + height_mm, dpi)) / dot_pt) * dot_pt
     left_dots = QUIET_ZONE_MODULES * module_dots
 
     c.saveState()
@@ -145,8 +188,39 @@ def draw_text(
     c.saveState()
     c.setFillColorRGB(grey, grey, grey)
     c.setFont("Helvetica-Bold" if bold else "Helvetica", size_pt)
-    c.drawString(mm_to_points(x_mm), mm_to_points(A4_HEIGHT_MM - y_mm), text)
+    c.drawString(mm_to_points(x_mm), mm_to_points(page_height_mm(c) - y_mm), text)
     c.restoreState()
+
+
+def draw_text_centered(
+    c: pdfcanvas.Canvas,
+    text: str,
+    *,
+    center_x_mm: float,
+    y_mm: float,
+    size_pt: float = 7.0,
+    bold: bool = False,
+    grey: float = 0.0,
+) -> None:
+    width_mm = text_width_mm(c, text, size_pt, bold)
+    draw_text(
+        c,
+        text,
+        x_mm=center_x_mm - width_mm / 2,
+        y_mm=y_mm,
+        size_pt=size_pt,
+        bold=bold,
+        grey=grey,
+    )
+
+
+def text_width_mm(
+    c: pdfcanvas.Canvas, text: str, size_pt: float = 7.0, bold: bool = False
+) -> float:
+    """Width of a string in millimetres, for centring and fitting checks."""
+    font = "Helvetica-Bold" if bold else "Helvetica"
+    width_pt = c.stringWidth(text, font, size_pt)
+    return width_pt * MM_PER_INCH / POINTS_PER_INCH
 
 
 def draw_rule(
@@ -161,6 +235,35 @@ def draw_rule(
     c.saveState()
     c.setStrokeColorRGB(grey, grey, grey)
     c.setLineWidth(thickness_pt)
-    y_pt = mm_to_points(A4_HEIGHT_MM - y_mm)
+    y_pt = mm_to_points(page_height_mm(c) - y_mm)
     c.line(mm_to_points(x_mm), y_pt, mm_to_points(x_mm + width_mm), y_pt)
+    c.restoreState()
+
+
+def draw_rect(
+    c: pdfcanvas.Canvas,
+    *,
+    x_mm: float,
+    y_mm: float,
+    width_mm: float,
+    height_mm: float,
+    thickness_pt: float = 0.3,
+    grey: float = 0.75,
+    dash: tuple[float, float] | None = None,
+) -> None:
+    """Outline a box in page space, with ``y_mm`` measured from the top."""
+    c.saveState()
+    c.setStrokeColorRGB(grey, grey, grey)
+    c.setLineWidth(thickness_pt)
+    if dash:
+        c.setDash(dash, 0)
+    page_h = page_height_mm(c)
+    c.rect(
+        mm_to_points(x_mm),
+        mm_to_points(page_h - y_mm - height_mm),
+        mm_to_points(width_mm),
+        mm_to_points(height_mm),
+        stroke=1,
+        fill=0,
+    )
     c.restoreState()
