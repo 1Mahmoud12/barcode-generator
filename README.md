@@ -143,6 +143,63 @@ The decoded fields are **shown, never used**. Nothing is derived from them and
 nothing is written back into the payload.
 
 
+## Trigger and Pre-Trigger bottles
+
+These are a separate family from the reagent cartridge and are easy to confuse
+with it:
+
+| | Bottle (Trigger / Pre-Trigger) | Cartridge |
+|---|---|---|
+| Code length | **10 characters** | 9 characters |
+| Code content | six bytes: item, lot, serial | nine bytes |
+| Carries a curve | **no** | yes, in the package QR |
+| Second code | GS1 DataMatrix (traceability) | none |
+
+The length difference is a real safeguard, not a detail: the tool refuses a
+9-character payload on a bottle label, so a cartridge code cannot be printed onto
+a trigger bottle by mistake.
+
+```
+python solution_app.py                 # window
+python make_solution.py --out trigger.pdf \
+    --set kind=trigger --set volume_ml=450 --set code=IQEApeCg6t \
+    --set lot=20250902 --set produced=2025-09-02 --set expiry=2027-04-14 \
+    --set gtin=06925912716570 --set internal=003067
+```
+
+### Sizes and GTIN
+
+Sizes are 200, 450 and 800 mL. The size is printed as text; it is **not** encoded
+into the Code 128, because the payload of a bottle code is fixed by the scheme and
+injecting a size would produce a code the instrument does not recognise.
+
+What distinguishes a 200 mL from an 800 mL is the **GTIN** in the GS1 DataMatrix.
+Each size needs its own. The builder refuses two situations:
+
+- the **same bottle code used twice** across the batch
+- **one GTIN covering two sizes**, because then a reader cannot tell them apart
+
+Both are refused rather than warned, because either one makes the register unable
+to say which bottle was filled.
+
+### Why zint is required
+
+The GS1 DataMatrix needs a real **FNC1** immediately after the start character.
+Without it a reader returns the application identifiers as literal text like
+`(01)0692...` instead of parsing them as fields. The pure-Python DataMatrix
+encoders available for Python do not emit FNC1 (reportlab's is also hardcoded to a
+single 44x44 symbol), so GS1 symbols are generated with
+[zint](https://zint.org.uk):
+
+```
+brew install zint        # macOS
+choco install zint       # Windows
+```
+
+Every GS1 symbol is decoded again after building and checked element by element
+before the file is offered. `--no-datamatrix` prints only the Code 128 if zint is
+not available.
+
 ## Fitting your own calibration curve
 
 A curve fitted from your own measurements is the only one that can honestly
@@ -370,6 +427,7 @@ bcgen/kind.py        the four pack items, QR matrix and drawing
 bcgen/pack.py        four-symbol sheet layout
 bcgen/payload.py     long base64 payload round-trip and structure display
 bcgen/calib.py       4PL/5PL fit, recovery, plausibility guards
+bcgen/solution.py    Trigger and Pre-Trigger bottle labels with GS1 DataMatrix
 bcgen/register.py    append-only print register with lot-mixing detection
 bcgen/render.py      dot-exact bar drawing, free sizing, grid snapping
 bcgen/sheet.py       A4 test-sheet layout
@@ -379,10 +437,12 @@ bcgen/results.py     observation log and smallest-working-size query
 make_sheet.py        command line for test sheets
 make_labels.py       command line for product labels
 make_pack.py         command line for the four pack symbols
+make_solution.py     command line for Trigger / Pre-Trigger bottle labels
 fit_curve.py         command line for calibration fitting
 app.py               window for test sheets
 label_app.py         window for product labels
 pack_app.py          window for the four pack symbols
+solution_app.py      window for Trigger / Pre-Trigger labels
 batch_app.py         window tying batch, curve, symbols and register together
 selftest.py          render, decode, compare
 verify_read.py       compare a scanner reading with the printed payload

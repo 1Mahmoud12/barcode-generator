@@ -5,3 +5,4 @@ zxing-cpp>=2.0
 Pillow>=10.0
 PySide6>=6.6
 numpy>=2.0
+ppf-datamatrix>=0.2
